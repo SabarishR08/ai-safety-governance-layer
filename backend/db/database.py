@@ -1,7 +1,9 @@
 """
 database.py — SQLite helpers shared across the app.
-The audit log uses its own connection in auditor.py;
-this module handles event storage for the live stream endpoint.
+
+Tables:
+  events   — event stream (per-request scan records)
+  policies — per-entity ALLOW/MASK/BLOCK rules, persisted in DB (inspired by sengan-s/techathon)
 """
 
 import sqlite3
@@ -10,6 +12,18 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any
 
 DB_PATH = "sentinel_events.db"
+
+# Default policies applied when no DB row exists for an entity
+DEFAULT_POLICIES: Dict[str, str] = {
+    "SSN":         "block",
+    "Aadhaar":     "block",
+    "Credit Card": "mask",
+    "Email":       "mask",
+    "Phone":       "mask",
+    "API Key":     "block",
+    "Gov ID":      "block",
+    "IP Address":  "allow",
+}
 
 
 def get_conn() -> sqlite3.Connection:
@@ -35,6 +49,23 @@ def init_events_db() -> None:
             )
             """
         )
+        # Policies table — key feature from sengan-s/techathon:
+        # policies persist across restarts; frontend loads them on init
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS policies (
+                entity_type TEXT PRIMARY KEY,
+                action      TEXT NOT NULL
+            )
+            """
+        )
+        # Seed defaults only if table is empty
+        existing = conn.execute("SELECT COUNT(*) FROM policies").fetchone()[0]
+        if existing == 0:
+            conn.executemany(
+                "INSERT OR IGNORE INTO policies (entity_type, action) VALUES (?, ?)",
+                list(DEFAULT_POLICIES.items()),
+            )
         conn.commit()
 
 
@@ -72,3 +103,23 @@ def get_events(limit: int = 50) -> List[Dict[str, Any]]:
         d["entities"] = json.loads(d["entities"])
         result.append(d)
     return result
+
+
+# ── Policy helpers ────────────────────────────────────────────────────────────
+
+def get_all_policies() -> Dict[str, str]:
+    """Return {entity_type: action} for all policies."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT entity_type, action FROM policies").fetchall()
+    return {r["entity_type"]: r["action"] for r in rows} if rows else dict(DEFAULT_POLICIES)
+
+
+def upsert_policy(entity_type: str, action: str) -> None:
+    """Create or update a policy row."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO policies (entity_type, action) VALUES (?, ?) "
+            "ON CONFLICT(entity_type) DO UPDATE SET action=excluded.action",
+            (entity_type, action),
+        )
+        conn.commit()

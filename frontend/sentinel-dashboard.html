@@ -375,6 +375,30 @@
   .ledger-hashes{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;}
   .ledger-hash{font-family:var(--mono);font-size:9.5px;color:var(--text-faint);}
   .ledger-hash.new{color:var(--text-dim);}
+  .verify-chain-btn{
+    background:transparent;border:1px solid var(--line);color:var(--text-faint);
+    font-family:var(--mono);font-size:9.5px;padding:3px 9px;border-radius:5px;
+    cursor:pointer;letter-spacing:.04em;transition:border-color .15s,color .15s;
+  }
+  .verify-chain-btn:hover{border-color:rgba(45,212,191,.4);color:var(--teal);}
+
+  /* Chain-line connector between ledger rows (sengan-s/techathon technique) */
+  .ledger-row{position:relative;}
+  .ledger-row:not(:last-child)::before{
+    content:"";position:absolute;left:3px;top:18px;bottom:-10px;
+    width:1px;background:var(--line);z-index:0;
+  }
+  .ledger-dot{position:relative;z-index:1;}
+
+  /* Toast notification */
+  .soc-toast{
+    position:fixed;bottom:28px;right:28px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:12px 18px;font-family:var(--mono);font-size:12px;
+    display:flex;align-items:center;gap:10px;z-index:999;
+    animation:toastIn .25s ease; box-shadow:0 4px 24px rgba(0,0,0,.4);
+  }
+  @keyframes toastIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
+  .toast-icon{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
   /* ============ /SOC PAGE ============ */
 
 </style>
@@ -533,7 +557,10 @@
 
         <!-- Audit Ledger -->
         <div class="soc-panel">
-          <div class="soc-panel-head">Audit Ledger</div>
+          <div class="soc-panel-head" style="display:flex;align-items:center;justify-content:space-between;">
+            <span>Audit Ledger</span>
+            <button class="verify-chain-btn" onclick="verifyChain()">Verify Chain</button>
+          </div>
           <div class="soc-panel-body">
             <div class="ledger-list" id="socLedger">
               <!-- injected by JS -->
@@ -1539,7 +1566,6 @@
     buildPolicyMatrix();
     drawTrend();
 
-    // Size trend canvas
     if (trendCanvas) {
       trendCanvas.width  = trendCanvas.offsetWidth || 200;
       trendCanvas.height = 56;
@@ -1547,38 +1573,143 @@
 
     animSOC();
 
-    // Spawn particles continuously
+    // ── Load policies from backend (sengan-s/techathon technique) ──
+    fetch('http://127.0.0.1:8000/api/policies')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && typeof data === 'object') {
+          // Backend returns {entity_type: action, ...}
+          for (const [k, v] of Object.entries(data)) {
+            if (SOC_POLICIES.hasOwnProperty(k)) SOC_POLICIES[k] = v;
+          }
+          buildPolicyMatrix();
+        }
+      })
+      .catch(() => {}); // backend not running — silently use defaults
+
+    // ── WebSocket: live events from backend ────────────────────────
+    let ws = null;
+    function connectWS() {
+      try {
+        ws = new WebSocket('ws://127.0.0.1:8000/ws/stream');
+        ws.onmessage = (evt) => {
+          try {
+            const data = JSON.parse(evt.data);
+            if (data.type === 'INTERCEPT') {
+              // Real event from backend — spawn particle with correct verdict
+              const v = (data.verdict || 'CLEAN').toLowerCase();
+              const colorMap = { clean: '#2DD4BF', masked: '#F5A623', blocked: '#F0466B' };
+              const shadowMap = { clean: 'rgba(45,212,191,.7)', masked: 'rgba(245,166,35,.7)', blocked: 'rgba(240,70,107,.7)' };
+              const ev = {
+                verdict: v, color: colorMap[v]||'#2DD4BF', shadow: shadowMap[v]||'rgba(45,212,191,.7)',
+                entity: data.description || null, desc: data.description || 'Live event'
+              };
+              _spawnFromEvent(ev);
+            } else if (data.type === 'POLICY_UPDATE') {
+              // Another client changed a policy — sync our state
+              if (data.entity_type && data.action && SOC_POLICIES.hasOwnProperty(data.entity_type)) {
+                SOC_POLICIES[data.entity_type] = data.action;
+                buildPolicyMatrix();
+              }
+            }
+          } catch(e) {}
+        };
+        ws.onclose = () => { ws = null; };
+        ws.onerror = () => { ws = null; };
+      } catch(e) {}
+    }
+    connectWS();
+
+    // ── Spawn particles continuously (background simulator) ────────
     let spawnInterval = null;
     function startSpawner() {
       spawnInterval = setInterval(() => {
-        const count = 1 + Math.floor(Math.random() * 2);
-        for (let i = 0; i < count; i++) {
-          setTimeout(spawnParticle, i * 180);
+        // Only run simulator if WS is NOT connected (backend running = real data)
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          const count = 1 + Math.floor(Math.random() * 2);
+          for (let i = 0; i < count; i++) setTimeout(spawnParticle, i * 180);
         }
       }, 600);
     }
 
-    // Only run spawner when SOC page is active
     function checkSOCActive() {
       const socPage = document.getElementById('page-soc');
       const isActive = socPage && socPage.classList.contains('active');
       if (isActive && !spawnInterval) {
         startSpawner();
+        if (!ws) connectWS();
       } else if (!isActive && spawnInterval) {
         clearInterval(spawnInterval);
         spawnInterval = null;
       }
     }
 
-    // Start immediately if SOC is first page
     checkSOCActive();
-
-    // Watch nav clicks
     document.querySelectorAll('.nav-item[data-page]').forEach(item => {
       item.addEventListener('click', () => setTimeout(checkSOCActive, 50));
     });
 
     window.addEventListener('resize', () => { resizeCanvas(); drawTrend(); });
+  }
+
+  // Helper: spawn a single particle from a specific event object
+  function _spawnFromEvent(ev) {
+    if (!canvas) return;
+    const y = 30 + Math.random() * (canvas.height - 60);
+    particles.push({
+      x: -8, y, vx: 1.2 + Math.random() * 1.6, vy: (Math.random() - 0.5) * 0.3,
+      r: 4 + Math.random() * 3, color: ev.color, shadow: ev.shadow,
+      verdict: ev.verdict, entity: ev.entity, desc: ev.desc,
+      blocked: ev.verdict === 'blocked', opacity: 1, dying: false,
+      blockX: ev.verdict === 'blocked' ? canvas.width * 0.5 + (Math.random() - 0.5) * 40 : null,
+    });
+    socStats.total++;
+    if (ev.verdict === 'masked')  socStats.masked++;
+    if (ev.verdict === 'blocked') socStats.blocked++;
+    const latency = 1 + Math.floor(Math.random() * 40);
+    socStats.latencySum += latency;
+    throughputCount++;
+    addLedgerEntry(ev.verdict, ev.entity, ev.desc, latency);
+    updateMetrics();
+  }
+
+  // ── Verify chain (sengan-s/techathon's "Verify Chain Integrity" button) ──────
+  function verifyChain() {
+    // Check each ledger row's hash chain is unbroken
+    const rows = [...document.querySelectorAll('#socLedger .ledger-row')];
+    let valid = true;
+    for (let i = 0; i < rows.length - 1; i++) {
+      const cur  = rows[i].querySelector('.ledger-hash.new')?.textContent?.replace(' →','').trim();
+      const next = rows[i+1].querySelector('.ledger-hash:not(.new)')?.textContent?.trim();
+      if (cur && next && cur !== next) { valid = false; break; }
+    }
+    showToast(
+      valid ? 'var(--teal)' : 'var(--red)',
+      valid ? '✓ Chain integrity verified — all hashes consistent'
+            : '✗ Chain integrity FAILED — tampered entry detected'
+    );
+  }
+
+  function showToast(color, msg) {
+    const existing = document.querySelector('.soc-toast');
+    if (existing) existing.remove();
+    const t = document.createElement('div');
+    t.className = 'soc-toast';
+    t.innerHTML = `<div class="toast-icon" style="background:${color};box-shadow:0 0 6px ${color};"></div><span>${msg}</span>`;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3500);
+  }
+
+  // Override setPolicy to also persist to backend
+  const _origSetPolicy = setPolicy;
+  function setPolicy(entity, action, btn) {
+    _origSetPolicy(entity, action, btn);
+    // Persist to backend (sengan-s/techathon technique)
+    fetch('http://127.0.0.1:8000/api/policies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entity_type: entity, action: action })
+    }).catch(() => {}); // silently fail if backend not running
   }
 
   // Run initSOC after DOM is ready (called after nav setup below)
