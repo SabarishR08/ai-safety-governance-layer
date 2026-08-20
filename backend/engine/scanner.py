@@ -18,8 +18,16 @@ from typing import List, Dict, Any
 HAS_PRESIDIO = False
 try:
     from presidio_analyzer import AnalyzerEngine
-    # Initialize Presidio Analyzer
-    analyzer = AnalyzerEngine()
+    from presidio_analyzer.nlp_engine import NlpEngineProvider
+    
+    # Configure NlpEngine to explicitly use spaCy with en_core_web_sm
+    nlp_config = {
+        "nlp_engine_name": "spacy",
+        "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
+    }
+    provider = NlpEngineProvider(nlp_configuration=nlp_config)
+    nlp_engine = provider.create_engine()
+    analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
     HAS_PRESIDIO = True
 except Exception:
     analyzer = None
