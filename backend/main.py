@@ -19,6 +19,8 @@ Background:
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import asyncio
 import json
@@ -26,6 +28,7 @@ import random
 import uuid
 from datetime import datetime, timezone
 from typing import List
+import os
 
 from models.schemas import (
     InspectRequest,
@@ -64,6 +67,18 @@ async def startup():
     init_events_db()
     # Start background traffic simulator (sengan-s/techathon technique)
     asyncio.create_task(simulate_traffic())
+
+
+# ── Serve the dashboard UI at GET / ──────────────────────────────────────────
+DASHBOARD = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "frontend", "sentinel-dashboard.html"
+)
+
+@app.get("/")
+async def serve_dashboard():
+    """Serve the Sentinel SOC dashboard at the root URL."""
+    return FileResponse(DASHBOARD, media_type="text/html")
 
 
 # ── WebSocket connection manager ─────────────────────────────────────────────
@@ -310,5 +325,7 @@ async def websocket_stream(ws: WebSocket):
         while True:
             await asyncio.sleep(30)
             await ws.send_text(json.dumps({"type": "ping"}))
-    except WebSocketDisconnect:
+    except Exception:
+        pass
+    finally:
         manager.disconnect(ws)
