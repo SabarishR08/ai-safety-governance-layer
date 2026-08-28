@@ -14,6 +14,35 @@ import base64
 import time
 from typing import List, Dict, Any
 
+# Dynamic import for Presidio Analyzer (NLP/NER based PII detection)
+HAS_PRESIDIO = False
+try:
+    from presidio_analyzer import AnalyzerEngine
+    from presidio_analyzer.nlp_engine import NlpEngineProvider
+    
+    # Configure NlpEngine to explicitly use spaCy with en_core_web_sm
+    nlp_config = {
+        "nlp_engine_name": "spacy",
+        "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
+    }
+    provider = NlpEngineProvider(nlp_configuration=nlp_config)
+    nlp_engine = provider.create_engine()
+    analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
+    HAS_PRESIDIO = True
+except Exception:
+    analyzer = None
+
+# Dynamic import for Detoxify (Toxicity detection)
+HAS_DETOXIFY = False
+try:
+    from detoxify import Detoxify
+    # Use the original model for fast inference
+    toxicity_model = Detoxify('original')
+    HAS_DETOXIFY = True
+except Exception:
+    toxicity_model = None
+
+
 # ── Regex PII rules ──────────────────────────────────────────────────────────
 
 PII_RULES = [
@@ -150,7 +179,53 @@ def scan(message: str) -> Dict[str, Any]:
     encoded_flag = _check_encoded_payload(message)
     decoded_text = _decode_encoded(message) if encoded_flag else message
 
-    # 2. Regex PII scan
+    # 2. NLP/NER Scan via Presidio (if available)
+    if HAS_PRESIDIO and analyzer:
+        try:
+            results = analyzer.analyze(text=decoded_text, language="en")
+            for res in results:
+                entity_type = res.entity_type
+                action = "MASK"
+                risk_weight = 50
+                mask_label = f"[{entity_type}]"
+                
+                if entity_type in ["US_SSN", "PASSPORT", "SSN"]:
+                    action = "BLOCK"
+                    risk_weight = 95
+                elif entity_type in ["CREDIT_CARD", "CRYPTO"]:
+                    action = "MASK"
+                    risk_weight = 85
+                elif entity_type in ["EMAIL_ADDRESS"]:
+                    action = "MASK"
+                    risk_weight = 30
+                elif entity_type in ["PHONE_NUMBER"]:
+                    action = "MASK"
+                    risk_weight = 40
+                elif entity_type in ["PERSON"]:
+                    action = "MASK"
+                    risk_weight = 50
+                
+                hit = decoded_text[res.start:res.end]
+                if hit in seen:
+                    continue
+                seen.add(hit)
+                
+                entities.append(
+                    {
+                        "type": entity_type.replace("_ADDRESS", "").replace("US_", "").title(),
+                        "action": action,
+                        "confidence": round(res.score, 2),
+                        "original": hit[:4] + "***" if len(hit) > 4 else "***",
+                    }
+                )
+                cleaned = re.sub(re.escape(hit), mask_label, cleaned)
+                max_risk = max(max_risk, risk_weight)
+                if action == "BLOCK":
+                    has_block = True
+        except Exception:
+            pass
+
+    # 3. Regex PII scan (captures custom templates and serves as fallback)
     for rule in PII_RULES:
         matches = rule["pattern"].findall(decoded_text)
         for hit in matches:
@@ -185,7 +260,26 @@ def scan(message: str) -> Dict[str, Any]:
         has_block = True
         max_risk = max(max_risk, 95)
 
-    # 4. Determine verdict
+    # 4. Toxicity detection (ML)
+    if HAS_DETOXIFY and toxicity_model:
+        try:
+            scores = toxicity_model.predict(decoded_text)
+            toxicity_score = scores['toxicity']
+            if toxicity_score > 0.7:
+                entities.append(
+                    {
+                        "type": "Toxicity",
+                        "action": "BLOCK",
+                        "confidence": round(float(toxicity_score), 2),
+                        "original": "***",
+                    }
+                )
+                has_block = True
+                max_risk = max(max_risk, 85)
+        except Exception:
+            pass
+
+    # 5. Determine verdict
     if has_block:
         verdict = "BLOCKED"
     elif entities:
