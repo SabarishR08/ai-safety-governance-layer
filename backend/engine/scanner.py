@@ -32,6 +32,16 @@ try:
 except Exception:
     analyzer = None
 
+# Dynamic import for Detoxify (Toxicity detection)
+HAS_DETOXIFY = False
+try:
+    from detoxify import Detoxify
+    # Use the original model for fast inference
+    toxicity_model = Detoxify('original')
+    HAS_DETOXIFY = True
+except Exception:
+    toxicity_model = None
+
 
 # ── Regex PII rules ──────────────────────────────────────────────────────────
 
@@ -250,7 +260,26 @@ def scan(message: str) -> Dict[str, Any]:
         has_block = True
         max_risk = max(max_risk, 95)
 
-    # 4. Determine verdict
+    # 4. Toxicity detection (ML)
+    if HAS_DETOXIFY and toxicity_model:
+        try:
+            scores = toxicity_model.predict(decoded_text)
+            toxicity_score = scores['toxicity']
+            if toxicity_score > 0.7:
+                entities.append(
+                    {
+                        "type": "Toxicity",
+                        "action": "BLOCK",
+                        "confidence": round(float(toxicity_score), 2),
+                        "original": "***",
+                    }
+                )
+                has_block = True
+                max_risk = max(max_risk, 85)
+        except Exception:
+            pass
+
+    # 5. Determine verdict
     if has_block:
         verdict = "BLOCKED"
     elif entities:

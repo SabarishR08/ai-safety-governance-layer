@@ -114,3 +114,29 @@ def get_stats() -> Dict[str, Any]:
         "critical_exposures": blocked,
         "avg_risk_score": round(avg_risk, 1),
     }
+
+
+def verify_chain() -> bool:
+    """Verify the integrity of the SHA-256 hash chain."""
+    with _get_conn() as conn:
+        rows = conn.execute("SELECT * FROM audit_log ORDER BY id ASC").fetchall()
+    
+    expected_prev = GENESIS_HASH
+    for row in rows:
+        if row["prev_hash"] != expected_prev:
+            return False
+        
+        computed_hash = _make_hash(
+            expected_prev, 
+            row["timestamp"], 
+            row["agent_id"], 
+            row["verdict"], 
+            row["event_summary"]
+        )
+        
+        if computed_hash != row["audit_hash"]:
+            return False
+            
+        expected_prev = computed_hash
+        
+    return True

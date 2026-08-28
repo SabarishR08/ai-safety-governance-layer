@@ -47,9 +47,10 @@ User / AI Agent
 | Feature | Description |
 |---|---|
 | **PII Detection** | Identifies emails, phone numbers, Aadhaar, PAN, SSN, credit cards, API keys, IP addresses |
+| **ML Toxicity & Threat Detection** | Uses `detoxify` (BERT-based) to identify and block toxic inputs and prompt injection |
 | **Masking** | Replaces sensitive entities with typed placeholders `[EMAIL]`, `[AADHAAR]`, etc. |
-| **Blocking** | Stops critical exposures (Gov IDs, SSN) from ever reaching the LLM |
-| **Audit Logs** | SHA-256 hash-chained, tamper-evident, exportable to CSV |
+| **Blocking** | Stops critical exposures (Gov IDs, SSN, Toxicity) from ever reaching the LLM |
+| **Audit Logs** | SHA-256 hash-chained, tamper-evident ledger with full backend cryptographic verification |
 | **Risk Scoring** | 0–100 weighted risk score across all active sessions |
 | **Live Dashboard** | Real-time SOC dashboard — event stream, agents, rules, reports |
 | **Playground** | Interactive UI to test interception live |
@@ -88,15 +89,22 @@ ai-safety-governance-layer/
 
 ## Quick Start
 
-### Backend
+### The Easy Way
+Simply run the included startup script from the root directory:
+```bash
+python run.py
+```
+This will automatically install dependencies and start the server.
+
+### Manual Setup
 ```bash
 cd backend
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-### Frontend
-Open `frontend/sentinel-dashboard.html` in any browser.
+### Dashboard
+Open `http://localhost:8000` in any browser (served automatically).
 
 API docs available at: `http://localhost:8000/docs`
 
