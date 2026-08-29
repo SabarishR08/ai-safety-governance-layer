@@ -34,3 +34,31 @@ async def log_audit_event(session: AsyncSession, session_id: str, entity_type: s
     session.add(new_log)
     await session.commit()
     return new_log
+
+async def verify_chain(session: AsyncSession) -> bool:
+    """Verify the integrity of the SHA-256 hash chain."""
+    result = await session.execute(select(AuditLog).order_by(AuditLog.id.asc()))
+    rows = result.scalars().all()
+    
+    expected_prev = "0" * 64
+    for row in rows:
+        if row.previous_hash != expected_prev:
+            return False
+        
+        payload = {
+            "session_id": row.session_id,
+            "entity_type": row.entity_type,
+            "action": row.action_taken,
+            "score": row.confidence_score,
+            "prev_hash": expected_prev
+        }
+        payload_str = json.dumps(payload, sort_keys=True)
+        computed_hash = hashlib.sha256(payload_str.encode()).hexdigest()
+        
+        if computed_hash != row.current_hash:
+            return False
+            
+        expected_prev = computed_hash
+        
+    return True
+

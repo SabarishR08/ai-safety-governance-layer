@@ -2,10 +2,20 @@ import React from 'react';
 import type { AuditLog } from '../App';
 
 export default function AuditLedger({ logs }: { logs: AuditLog[] }) {
+  const verifyChain = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/audit/verify');
+      const data = await res.json();
+      alert(data.valid ? '✅ Audit chain is cryptographically valid.' : '❌ Audit chain integrity compromised!');
+    } catch (e) {
+      alert('Error verifying chain');
+    }
+  };
+
   return (
     <div style={{ height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-        <button style={{ 
+        <button onClick={verifyChain} style={{ 
           background: 'transparent', 
           border: '1px solid var(--bg-panel-border)', 
           color: 'var(--text-secondary)',
