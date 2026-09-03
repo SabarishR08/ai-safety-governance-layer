@@ -1,4 +1,64 @@
-# AI Safety & Governance Layer — Sentinel
+# Ai Safety Governance Layer
+
+![License](https://img.shields.io/badge/license-MIT-green) ![Language](https://img.shields.io/badge/language-Python-informational)
+
+
+## 📌 Overview
+
+Real-time PII detection, masking, and audit-log firewall for AI/agentic systems — PEC Techathon 4.0
+
+## 🏗️ Architecture
+
+```text
+Browser / UI
+     │   HTTP
+     ▼
+FastAPI app
+     │
+     ├──▶ Database — SQLite
+     └──▶ ML models — PyTorch, Transformers, SentenceTransformers
+```
+
+## 🧰 Tech Stack
+
+- **Language:** Python
+- **Backend:** FastAPI
+- **Database:** SQLite
+- **ML:** PyTorch, Transformers, SentenceTransformers
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- Python 3.10+
+
+### 1. Clone
+
+```bash
+git clone https://github.com/SabarishR08/ai-safety-governance-layer.git
+cd ai-safety-governance-layer
+```
+
+### 2. Install dependencies
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 4. Run
+
+```bash
+python backend/main.py
+```
+
+```bash
+python run.py
+```
+
+
+---
 
 > **PEC Techathon 4.0** · Track: Responsible AI, Compliance & Security
 
@@ -157,6 +217,8 @@ Built for **PEC Techathon 4.0** — Responsible AI, Compliance & Security track.
 
 ---
 
-## License
+---
 
-MIT
+## 📄 License
+
+[MIT](LICENSE) — © 2026 Sabarish R.
