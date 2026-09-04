@@ -10,8 +10,9 @@ import sqlite3
 import json
 from datetime import datetime, timezone
 from typing import List, Dict, Any
+import os
 
-DB_PATH = "sentinel_events.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sentinel_events.db")
 
 # Default policies applied when no DB row exists for an entity
 DEFAULT_POLICIES: Dict[str, str] = {

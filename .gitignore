@@ -43,3 +43,9 @@ npm-debug.log*
 .env.local
 .env.production
 secrets.yaml
+
+# Local tool caches & scratch drafts
+.freebuff/
+CTS-PPT/
+New Text Document*.txt
+

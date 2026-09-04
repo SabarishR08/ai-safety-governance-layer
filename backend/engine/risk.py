@@ -17,10 +17,14 @@ _window: Deque[Dict[str, Any]] = deque(maxlen=500)
 # Session risk registry  {session_id: latest_risk_score}
 _sessions: Dict[str, int] = {}
 
+# Per-agent risk history for sparkline (last 30 per agent)
+_agent_history: Dict[str, list] = {}  # {agent_id: [{ts, score}, ...]}
+_agent_history_max = 30
+
 _start_time = datetime.now(timezone.utc)
 
 
-def record(session_id: str, risk_score: int, verdict: str) -> None:
+def record(session_id: str, risk_score: int, verdict: str, agent_id: str = "") -> None:
     """Record a scan result into the sliding window."""
     with _lock:
         _window.append(
@@ -32,6 +36,15 @@ def record(session_id: str, risk_score: int, verdict: str) -> None:
             }
         )
         _sessions[session_id] = risk_score
+        if agent_id:
+            if agent_id not in _agent_history:
+                _agent_history[agent_id] = []
+            _agent_history[agent_id].append({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "score": risk_score,
+            })
+            if len(_agent_history[agent_id]) > _agent_history_max:
+                _agent_history[agent_id] = _agent_history[agent_id][-_agent_history_max:]
 
 
 def aggregate_risk() -> float:
@@ -58,6 +71,12 @@ def session_breakdown() -> Dict[str, int]:
         elevated = sum(1 for s in _sessions.values() if 40 <= s < 80)
         nominal = sum(1 for s in _sessions.values() if s < 40)
     return {"critical": critical, "elevated": elevated, "nominal": nominal}
+
+
+def agent_history() -> Dict[str, list]:
+    """Return {agent_id: [{ts, score}, ...]} for sparkline rendering."""
+    with _lock:
+        return dict(_agent_history)
 
 
 def uptime_seconds() -> float:

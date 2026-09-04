@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from typing import List, Dict, Any
 
 
-DB_PATH = "sentinel_audit.db"
+import os
+
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sentinel_audit.db")
 GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
 
 
@@ -116,15 +118,22 @@ def get_stats() -> Dict[str, Any]:
     }
 
 
-def verify_chain() -> bool:
-    """Verify the integrity of the SHA-256 hash chain."""
+def verify_chain() -> Dict[str, Any]:
+    """Verify the integrity of the SHA-256 hash chain and pinpoint any tampered block."""
     with _get_conn() as conn:
         rows = conn.execute("SELECT * FROM audit_log ORDER BY id ASC").fetchall()
     
+    if not rows:
+        return {"valid": True, "total_blocks": 0, "message": "Genesis state: ledger is empty"}
+
     expected_prev = GENESIS_HASH
     for row in rows:
         if row["prev_hash"] != expected_prev:
-            return False
+            return {
+                "valid": False,
+                "error_id": row["id"],
+                "reason": f"Broken chain link at Block #{row['id']}: prev_hash pointer was corrupted!",
+            }
         
         computed_hash = _make_hash(
             expected_prev, 
@@ -135,8 +144,76 @@ def verify_chain() -> bool:
         )
         
         if computed_hash != row["audit_hash"]:
-            return False
+            return {
+                "valid": False,
+                "error_id": row["id"],
+                "reason": f"Tampered entry detected at Block #{row['id']}: row payload was illegally altered!",
+                "expected_hash": computed_hash[:10] + "…",
+                "found_hash": row["audit_hash"][:10] + "…",
+            }
             
         expected_prev = computed_hash
         
-    return True
+    return {
+        "valid": True, 
+        "total_blocks": len(rows), 
+        "message": f"Cryptographic integrity verified across all {len(rows)} blocks from genesis"
+    }
+
+
+def tamper_entry(entry_id: int = None) -> Dict[str, Any]:
+    """
+    Simulate a malicious insider attack: modifies a log record's verdict/summary
+    directly in SQLite without updating the cryptographic hash chain.
+    """
+    with _get_conn() as conn:
+        if entry_id is None:
+            # Pick a middle/recent row
+            row = conn.execute("SELECT id, event_summary FROM audit_log ORDER BY id DESC LIMIT 1 OFFSET 2").fetchone()
+            if not row:
+                row = conn.execute("SELECT id, event_summary FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
+            if not row:
+                return {"status": "error", "message": "No audit entries exist to tamper"}
+            entry_id = row["id"]
+        
+        conn.execute(
+            "UPDATE audit_log SET event_summary = ?, verdict = 'CLEAN' WHERE id = ?",
+            ("[TAMPERED BY ATTACKER] Data exposure erased from audit record", entry_id)
+        )
+        conn.commit()
+    
+    return {
+        "status": "tampered", 
+        "tampered_id": entry_id, 
+        "message": f"Simulated attack: Block #{entry_id} payload altered in SQLite without updating SHA-256 hash!"
+    }
+
+
+def restore_chain() -> Dict[str, Any]:
+    """
+    Recalculate and repair all SHA-256 hashes sequentially from genesis.
+    Demonstrates self-healing cryptographic reconciliation.
+    """
+    with _get_conn() as conn:
+        rows = conn.execute("SELECT * FROM audit_log ORDER BY id ASC").fetchall()
+        expected_prev = GENESIS_HASH
+        for row in rows:
+            valid_hash = _make_hash(
+                expected_prev,
+                row["timestamp"],
+                row["agent_id"],
+                row["verdict"],
+                row["event_summary"]
+            )
+            conn.execute(
+                "UPDATE audit_log SET prev_hash = ?, audit_hash = ? WHERE id = ?",
+                (expected_prev, valid_hash, row["id"])
+            )
+            expected_prev = valid_hash
+        conn.commit()
+
+    return {
+        "status": "restored", 
+        "repaired_blocks": len(rows), 
+        "message": f"Cryptographic chain repaired: Hashes recalculated sequentially for {len(rows)} blocks."
+    }

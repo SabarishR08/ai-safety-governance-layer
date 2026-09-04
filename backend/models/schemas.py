@@ -14,6 +14,7 @@ class DetectedEntity(BaseModel):
     action: str           # MASK | BLOCK | STRIP | FLAG
     confidence: float
     original: Optional[str] = None   # redacted in production logs
+    reason: Optional[str] = None     # explainability: why this entity was flagged
 
 
 class InspectResponse(BaseModel):

@@ -29,6 +29,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import List
 import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 from models.schemas import (
     InspectRequest,
@@ -53,9 +58,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+SIMULATE_TRAFFIC = os.getenv("SIMULATE_TRAFFIC", "true").lower() in ("true", "1")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -65,8 +73,8 @@ app.add_middleware(
 async def startup():
     auditor.init_db()
     init_events_db()
-    # Start background traffic simulator (sengan-s/techathon technique)
-    asyncio.create_task(simulate_traffic())
+    if SIMULATE_TRAFFIC:
+        asyncio.create_task(simulate_traffic())
 
 
 # ── Serve the dashboard UI at GET / ──────────────────────────────────────────
@@ -177,7 +185,7 @@ async def _run_inspect(req: InspectRequest) -> InspectResponse:
         risk_score=risk_score,
     )
 
-    risk.record(req.session_id, risk_score, verdict)
+    risk.record(req.session_id, risk_score, verdict, agent_id=req.agent_id)
 
     write_event(
         verdict=verdict,
@@ -261,9 +269,21 @@ async def get_audit_log(limit: int = 50):
 
 @app.get("/api/audit/verify")
 async def verify_audit_chain():
-    """Verify the integrity of the audit log."""
-    is_valid = auditor.verify_chain()
-    return {"valid": is_valid}
+    """Verify cryptographic integrity of the SHA-256 hash chain."""
+    return auditor.verify_chain()
+
+
+@app.post("/api/audit/tamper")
+async def tamper_audit_chain():
+    """Simulate a malicious insider attack by modifying a database record without updating its hash."""
+    return auditor.tamper_entry()
+
+
+@app.post("/api/audit/restore")
+async def restore_audit_chain():
+    """Restore and recompute valid hash chain across all blocks."""
+    return auditor.restore_chain()
+
 
 
 @app.get("/api/stats", response_model=StatsResponse)
@@ -314,6 +334,12 @@ async def update_policy(update: PolicyUpdate):
     upsert_policy(update.entity_type, update.action.lower())
     await manager.broadcast({"type": "POLICY_UPDATE", "entity_type": update.entity_type, "action": update.action.lower()})
     return {"status": "ok", "entity_type": update.entity_type, "action": update.action.lower()}
+
+
+@app.get("/api/agents/risk-history")
+async def get_agent_risk_history():
+    """Per-agent risk score history for sparkline rendering."""
+    return risk.agent_history()
 
 
 @app.get("/api/health")

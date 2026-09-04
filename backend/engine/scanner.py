@@ -12,73 +12,62 @@ import re
 import hashlib
 import base64
 import time
+import os
 from typing import List, Dict, Any
 
-# Dynamic import for Presidio Analyzer (NLP/NER based PII detection)
-HAS_PRESIDIO = False
-try:
-    from presidio_analyzer import AnalyzerEngine
-    from presidio_analyzer.nlp_engine import NlpEngineProvider
-    
-    # Configure NlpEngine to explicitly use spaCy with en_core_web_sm
-    nlp_config = {
-        "nlp_engine_name": "spacy",
-        "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
-    }
-    provider = NlpEngineProvider(nlp_configuration=nlp_config)
-    nlp_engine = provider.create_engine()
-    analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
-    HAS_PRESIDIO = True
-except Exception:
-    analyzer = None
+# Dynamic import for Presidio & Detoxify (NLP/NER & BERT ML)
+# Guarded by ENABLE_HEAVY_ML env var to ensure instant, freeze-free demo startup.
+ENABLE_HEAVY_ML = os.getenv("ENABLE_HEAVY_ML", "false").lower() in ("true", "1")
 
-# Dynamic import for Detoxify (Toxicity detection)
+HAS_PRESIDIO = False
+analyzer = None
+if ENABLE_HEAVY_ML:
+    try:
+        from presidio_analyzer import AnalyzerEngine
+        from presidio_analyzer.nlp_engine import NlpEngineProvider
+        
+        nlp_config = {
+            "nlp_engine_name": "spacy",
+            "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],
+        }
+        provider = NlpEngineProvider(nlp_configuration=nlp_config)
+        nlp_engine = provider.create_engine()
+        analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
+        HAS_PRESIDIO = True
+    except Exception:
+        analyzer = None
+
 HAS_DETOXIFY = False
-try:
-    from detoxify import Detoxify
-    # Use the original model for fast inference
-    toxicity_model = Detoxify('original')
-    HAS_DETOXIFY = True
-except Exception:
-    toxicity_model = None
+toxicity_model = None
+if ENABLE_HEAVY_ML:
+    try:
+        from detoxify import Detoxify
+        toxicity_model = Detoxify('original')
+        HAS_DETOXIFY = True
+    except Exception:
+        toxicity_model = None
 
 
 # ── Regex PII rules ──────────────────────────────────────────────────────────
 
 PII_RULES = [
     {
-        "type": "Email",
-        "action": "MASK",
-        "confidence": 0.95,
+        "type": "API Key",
+        "action": "BLOCK",
+        "confidence": 0.98,
         "pattern": re.compile(
-            r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", re.IGNORECASE
+            r"\b(?:sk|pk|api|key|token|secret)[_\-]?[a-zA-Z0-9_\-]{16,}\b", re.IGNORECASE
         ),
-        "mask": "[EMAIL]",
-        "risk_weight": 30,
+        "mask": "[API_KEY]",
+        "risk_weight": 95,
     },
     {
-        "type": "Aadhaar",
+        "type": "SSN",
         "action": "BLOCK",
         "confidence": 0.97,
-        "pattern": re.compile(r"\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b"),
-        "mask": "[AADHAAR]",
-        "risk_weight": 90,
-    },
-    {
-        "type": "Credit Card",
-        "action": "MASK",
-        "confidence": 0.98,
-        "pattern": re.compile(r"\b(?:\d[ \-]?){13,16}\b"),
-        "mask": "[CARD]",
-        "risk_weight": 85,
-    },
-    {
-        "type": "Phone",
-        "action": "MASK",
-        "confidence": 0.88,
-        "pattern": re.compile(r"(?:\+?\d[\d\s\-]{8,14}\d)"),
-        "mask": "[PHONE]",
-        "risk_weight": 40,
+        "pattern": re.compile(r"\b\d{3}[\-\s]\d{2}[\-\s]\d{4}\b"),
+        "mask": "[SSN]",
+        "risk_weight": 95,
     },
     {
         "type": "Gov ID (PAN)",
@@ -89,26 +78,42 @@ PII_RULES = [
         "risk_weight": 90,
     },
     {
-        "type": "API Key",
-        "action": "STRIP",
+        "type": "Credit Card",
+        "action": "MASK",
         "confidence": 0.98,
-        "pattern": re.compile(
-            r"(?:sk|pk|api|key|token|secret)[_\-]?[a-zA-Z0-9]{16,}", re.IGNORECASE
-        ),
-        "mask": "[API_KEY]",
-        "risk_weight": 80,
+        "pattern": re.compile(r"\b(?:\d{4}[ \-]?){3}\d{4}\b|\b(?:\d[ \-]?){15,16}\b"),
+        "mask": "[CARD]",
+        "risk_weight": 85,
     },
     {
-        "type": "SSN",
+        "type": "Aadhaar",
         "action": "BLOCK",
         "confidence": 0.97,
-        "pattern": re.compile(r"\b\d{3}[\-\s]?\d{2}[\-\s]?\d{4}\b"),
-        "mask": "[SSN]",
-        "risk_weight": 95,
+        "pattern": re.compile(r"\b\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b(?!\d)|\bUID:?\s*\d{4}[\s\-]?\d{4}[\s\-]?\d{4}\b"),
+        "mask": "[AADHAAR]",
+        "risk_weight": 90,
+    },
+    {
+        "type": "Email",
+        "action": "MASK",
+        "confidence": 0.95,
+        "pattern": re.compile(
+            r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b", re.IGNORECASE
+        ),
+        "mask": "[EMAIL]",
+        "risk_weight": 30,
+    },
+    {
+        "type": "Phone",
+        "action": "MASK",
+        "confidence": 0.88,
+        "pattern": re.compile(r"\b(?:\+?\d{1,3}[\s\-]?)?(?:\(?\d{2,4}\)?[\s\-]?)?[5-9]\d{2}[\-\s]?\d{3}[\-\s]?\d{4}\b|\b(?:\+91[\s\-]?)?[6-9]\d{4}[\s\-]?\d{5}\b"),
+        "mask": "[PHONE]",
+        "risk_weight": 40,
     },
     {
         "type": "IP Address",
-        "action": "FLAG",
+        "action": "MASK",
         "confidence": 0.91,
         "pattern": re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
         "mask": "[IP]",
@@ -216,6 +221,7 @@ def scan(message: str) -> Dict[str, Any]:
                         "action": action,
                         "confidence": round(res.score, 2),
                         "original": hit[:4] + "***" if len(hit) > 4 else "***",
+                        "reason": f"Presidio NER detected {entity_type} with score {res.score:.0%}",
                     }
                 )
                 cleaned = re.sub(re.escape(hit), mask_label, cleaned)
@@ -227,7 +233,7 @@ def scan(message: str) -> Dict[str, Any]:
 
     # 3. Regex PII scan (captures custom templates and serves as fallback)
     for rule in PII_RULES:
-        matches = rule["pattern"].findall(decoded_text)
+        matches = rule["pattern"].findall(cleaned)
         for hit in matches:
             if hit in seen:
                 continue
@@ -238,6 +244,7 @@ def scan(message: str) -> Dict[str, Any]:
                     "action": rule["action"],
                     "confidence": round(rule["confidence"] + (hash(hit) % 5) / 100, 2),
                     "original": hit[:4] + "***" if len(hit) > 4 else "***",
+                    "reason": f"Matched regex rule for {rule['type']} — {rule['action']} per policy",
                 }
             )
             # Replace in cleaned text
@@ -246,21 +253,29 @@ def scan(message: str) -> Dict[str, Any]:
             if rule["action"] == "BLOCK":
                 has_block = True
 
-    # 3. Injection detection
+    # 4. Injection detection
     injection_flag = _check_injection(message)
     if injection_flag:
+        # Find which pattern matched for explainability
+        injection_reason = "Prompt injection heuristic matched"
+        for pat in INJECTION_PATTERNS:
+            m = pat.search(message)
+            if m:
+                injection_reason = f"Detected injection pattern: '{m.group()}'"
+                break
         entities.append(
             {
                 "type": "Prompt Injection",
                 "action": "BLOCK",
                 "confidence": 0.93,
                 "original": "***",
+                "reason": injection_reason,
             }
         )
         has_block = True
         max_risk = max(max_risk, 95)
 
-    # 4. Toxicity detection (ML)
+    # 5. Toxicity detection (ML)
     if HAS_DETOXIFY and toxicity_model:
         try:
             scores = toxicity_model.predict(decoded_text)
@@ -272,6 +287,7 @@ def scan(message: str) -> Dict[str, Any]:
                         "action": "BLOCK",
                         "confidence": round(float(toxicity_score), 2),
                         "original": "***",
+                        "reason": f"BERT toxicity model scored {toxicity_score:.0%} — above 70% threshold",
                     }
                 )
                 has_block = True
@@ -279,7 +295,7 @@ def scan(message: str) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # 5. Determine verdict
+    # 6. Determine verdict
     if has_block:
         verdict = "BLOCKED"
     elif entities:
@@ -287,7 +303,7 @@ def scan(message: str) -> Dict[str, Any]:
     else:
         verdict = "CLEAN"
 
-    # 5. Risk score: blend max entity risk with count factor
+    # 7. Risk score: blend max entity risk with count factor
     count_factor = min(len(entities) * 5, 20)
     risk_score = min(int(max_risk + count_factor), 100) if entities else 0
 
