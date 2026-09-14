@@ -3,11 +3,11 @@
 ![License](https://img.shields.io/badge/license-MIT-green) ![Language](https://img.shields.io/badge/language-Python-informational)
 
 
-## 📌 Overview
+## Overview
 
 Real-time PII detection, masking, and audit-log firewall for AI/agentic systems — PEC Techathon 4.0
 
-## 🏗️ Architecture
+## Architecture
 
 ```text
 Browser / UI
@@ -19,14 +19,14 @@ FastAPI app
      └──▶ ML models — PyTorch, Transformers, SentenceTransformers
 ```
 
-## 🧰 Tech Stack
+## Tech Stack
 
 - **Language:** Python
 - **Backend:** FastAPI
 - **Database:** SQLite
 - **ML:** PyTorch, Transformers, SentenceTransformers
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -219,6 +219,6 @@ Built for **PEC Techathon 4.0** — Responsible AI, Compliance & Security track.
 
 ---
 
-## 📄 License
+## License
 
 [MIT](LICENSE) — © 2026 Sabarish R.
