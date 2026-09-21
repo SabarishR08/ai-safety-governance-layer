@@ -211,14 +211,6 @@ POST /api/inspect
 
 ---
 
-## Team
-
-Built for **PEC Techathon 4.0** — Responsible AI, Compliance & Security track.
-
----
-
----
-
 ## License
 
 [MIT](LICENSE) — © 2026 Sabarish R.
